@@ -15,7 +15,7 @@ export async function authenticate(req: AuthRequest, _res: Response, next: NextF
     const decoded = verifyAccessToken(token);
 
     const sessionExists = await prisma.session.findFirst({
-      where: { userId: decoded.userId },
+      where: { id: decoded.sessionId },
       select: { id: true },
     });
     if (!sessionExists) {

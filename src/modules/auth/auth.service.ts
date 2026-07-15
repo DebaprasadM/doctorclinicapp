@@ -54,21 +54,27 @@ export class AuthService {
       userId: user.id,
       clinicId: user.clinicId || undefined,
       role: user.role as JwtPayload['role'],
+      sessionId: '',
     };
-
-    const tokens = generateTokenPair(payload);
 
     await prisma.session.deleteMany({ where: { userId: user.id } });
 
-    await prisma.session.create({
+    const session = await prisma.session.create({
       data: {
         userId: user.id,
-        refreshToken: tokens.refreshToken,
+        refreshToken: '',
         userAgent: userAgent || null,
         ipAddress: ipAddress || null,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         clinicId: user.clinicId,
       },
+    });
+
+    const tokens = generateTokenPair({ ...payload, sessionId: session.id });
+
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { refreshToken: tokens.refreshToken },
     });
 
     await prisma.user.update({
@@ -100,6 +106,7 @@ export class AuthService {
         userId: decoded.userId,
         clinicId: decoded.clinicId,
         role: decoded.role,
+        sessionId: session.id,
       };
 
       const tokens = generateTokenPair(payload);
@@ -143,20 +150,27 @@ export class AuthService {
       userId: user.id,
       clinicId: clinicId || undefined,
       role: user.role as JwtPayload['role'],
+      sessionId: '',
     };
 
-    const tokens = generateTokenPair(payload);
-
     await prisma.session.deleteMany({ where: { userId } });
-    await prisma.session.create({
+
+    const session = await prisma.session.create({
       data: {
         userId: user.id,
-        refreshToken: tokens.refreshToken,
+        refreshToken: '',
         userAgent: userAgent || null,
         ipAddress: ipAddress || null,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         clinicId: clinicId || null,
       },
+    });
+
+    const tokens = generateTokenPair({ ...payload, sessionId: session.id });
+
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { refreshToken: tokens.refreshToken },
     });
 
     logger.info(`User ${user.email} switched to clinic: ${clinicId || 'none (super admin)'}`);

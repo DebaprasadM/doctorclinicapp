@@ -12,6 +12,7 @@ export interface JwtPayload {
   userId: string;
   clinicId?: string;
   role: Role;
+  sessionId: string;
 }
 
 export interface AuthRequest extends Request {
