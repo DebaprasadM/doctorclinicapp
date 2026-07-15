@@ -1,0 +1,360 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== TENANCY & AUTH ====================
+
+model Clinic {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?  @unique
+  phone     String?
+  address   String?
+  logo      String?
+  timezone  String   @default("Asia/Kolkata")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isActive  Boolean  @default(true)
+
+  users         User[]
+  departments   Department[]
+  patients      Patient[]
+  visits        Visit[]
+  payments      Payment[]
+  prescriptions Prescription[]
+  settings      ClinicSetting[]
+  auditLogs     AuditLog[]
+  sessions      Session[]
+  doctors       Doctor[]
+  queueEntries  QueueEntry[]
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  firstName     String
+  lastName      String
+  phone         String?
+  avatar        String?
+  role          String   @default("RECEPTIONIST") // SUPER_ADMIN, CLINIC_ADMIN, DOCTOR, RECEPTIONIST
+  isActive      Boolean  @default(true)
+  lastLoginAt   DateTime?
+  clinicId      String?
+  clinic        Clinic?  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  doctor          Doctor?
+  refreshTokens   Session[]
+  createdVisits   Visit[]    @relation("VisitCreatedBy")
+  receivedPayments Payment[]
+
+  @@index([clinicId])
+  @@index([email])
+  @@index([role])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  clinicId     String?
+  clinic       Clinic?  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([refreshToken])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String   // CREATE, UPDATE, DELETE
+  entity    String   // User, Patient, Visit, Payment, Prescription, etc.
+  entityId  String?
+  userId    String?
+  clinicId  String?
+  clinic    Clinic?  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([clinicId])
+  @@index([entity, entityId])
+  @@index([action])
+}
+
+// ==================== DOCTORS ====================
+
+model Doctor {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialization   String?
+  qualification    String?
+  registrationNo   String?
+  consultationFee  Float    @default(0)
+  availableDays    String?  // JSON array: ["Monday","Tuesday",...]
+  availableSlots   String?  // JSON array of time slots
+  isAvailable      Boolean  @default(true)
+  isClinicAdmin    Boolean  @default(false)
+  bio              String?
+  signature        String?
+  clinicId         String?
+  clinic           Clinic?  @relation(fields: [clinicId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  visits          Visit[]
+  prescriptions   Prescription[]
+  queueEntries    QueueEntry[]
+
+  @@index([clinicId])
+  @@index([userId])
+}
+
+// ==================== DEPARTMENTS ====================
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String
+  code      String?
+  description String?
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([name, clinicId])
+  @@index([clinicId])
+}
+
+// ==================== PATIENTS ====================
+
+model Patient {
+  id              String   @id @default(cuid())
+  patientId       String   @unique // Human-readable unique ID: PT-CLIN-XXXXXX
+  firstName       String
+  lastName        String
+  gender          String   // MALE, FEMALE, OTHER
+  dateOfBirth     DateTime?
+  age             Int?
+  bloodGroup      String?  // A+, A-, B+, B-, AB+, AB-, O+, O-
+  phone           String
+  whatsappNumber  String?
+  email           String?
+  address         String?
+  emergencyContact String?
+  occupation      String?
+  medicalNotes    String?
+  avatar          String?
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  visits          Visit[]
+  payments        Payment[]
+  prescriptions   Prescription[]
+  treatmentPhotos TreatmentPhoto[]
+
+  @@unique([firstName, lastName, phone, clinicId])
+  @@index([clinicId])
+  @@index([patientId])
+  @@index([phone])
+  @@index([firstName, lastName])
+}
+
+// ==================== OPD VISITS ====================
+
+model Visit {
+  id               String   @id @default(cuid())
+  visitDate        DateTime @default(now())
+  tokenNumber      Int
+  consultationType String   @default("GENERAL") // GENERAL, FOLLOW_UP, EMERGENCY
+  status           String   @default("WAITING") // WAITING, IN_CONSULTATION, COMPLETED, SKIPPED
+  symptoms         String?
+  diagnosis        String?
+  clinicalNotes    String?
+  vitals           String?  // JSON: { bp, pulse, temperature, weight, height, spo2 }
+  isActive         Boolean  @default(true)
+
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  doctorId    String
+  doctor      Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  clinicId    String
+  clinic      Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  createdById String?
+  createdBy   User?    @relation("VisitCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  payment         Payment?
+  prescription    Prescription?
+  queueEntry      QueueEntry?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([doctorId, clinicId, visitDate, tokenNumber])
+  @@index([clinicId])
+  @@index([doctorId])
+  @@index([patientId])
+  @@index([visitDate])
+  @@index([status])
+  @@index([doctorId, visitDate, status])
+}
+
+// ==================== PAYMENTS ====================
+
+model Payment {
+  id            String   @id @default(cuid())
+  receiptNumber String   @unique
+  amount        Float
+  discount      Float    @default(0)
+  netAmount     Float
+  paymentMethod String   @default("CASH") // CASH, UPI, CARD, ONLINE
+  paymentStatus String   @default("PAID") // PAID, PENDING, REFUNDED
+  referenceNo   String?  // Transaction reference for UPI/Card/Online
+  notes         String?
+
+  visitId   String   @unique
+  visit     Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  receivedById String?
+  receivedBy   User?    @relation(fields: [receivedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clinicId])
+  @@index([patientId])
+  @@index([visitId])
+  @@index([paymentStatus])
+  @@index([createdAt])
+}
+
+// ==================== PRESCRIPTIONS ====================
+
+model Prescription {
+  id               String   @id @default(cuid())
+  prescriptionNo   String   @unique
+  diagnosis        String?
+  clinicalNotes    String?
+  investigations   String?  // JSON array or text
+  advice           String?
+  nextVisitDate    DateTime?
+  doctorSignature  String?
+  pdfUrl           String?  // URL to generated PDF
+  qrCode           String?  // Base64 or URL
+  isSentViaWhatsApp Boolean @default(false)
+  expiryDate       DateTime?
+
+  visitId   String   @unique
+  visit     Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  doctorId  String
+  doctor    Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  medicines PrescriptionMedicine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clinicId])
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([prescriptionNo])
+}
+
+model PrescriptionMedicine {
+  id             String @id @default(cuid())
+  name           String
+  dosage         String
+  frequency      String
+  duration       String
+  instructions   String?
+  route          String? // Oral, IV, Topical, etc.
+  isActive       Boolean @default(true)
+
+  prescriptionId String
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  @@index([prescriptionId])
+}
+
+// ==================== SETTINGS ====================
+
+model ClinicSetting {
+  id          String @id @default(cuid())
+  key         String
+  value       String  // JSON stringified
+  description String?
+  clinicId    String
+  clinic      Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@unique([key, clinicId])
+  @@index([clinicId])
+}
+
+// ==================== PATIENT QUEUE (for waiting list) ====================
+
+model QueueEntry {
+  id        String   @id @default(cuid())
+  tokenNumber Int
+  status    String   @default("WAITING") // WAITING, CALLED, IN_CONSULTATION, COMPLETED, SKIPPED
+  calledAt  DateTime?
+  completedAt DateTime?
+
+  visitId   String   @unique
+  visit     Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  doctorId  String
+  doctor    Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clinicId, doctorId, status])
+  @@index([doctorId, createdAt])
+}
+
+// ==================== TREATMENT PHOTOS ====================
+
+model TreatmentPhoto {
+  id          String   @id @default(cuid())
+  url         String
+  caption     String?
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  uploadedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([patientId])
+}
